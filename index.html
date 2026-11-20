@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>問行情｜宏國地政</title>
+<style>
+:root{--ink:#1f2a37;--muted:#5b6675;--line:#dbe2ea;--bg:#f5f7fa;--card:#fff;--brand:#16324f;--gold:#c99a3b;--ok:#1f7a4d;--warn:#a15c00;--soft:#eef3f8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 "Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:26px;margin:4px 0 2px;color:var(--brand)}
+.sub{color:var(--muted);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+h2{font-size:18px;margin:0 0 10px;color:var(--brand)}
+textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+button{font:inherit;border-radius:8px;border:1px solid var(--brand);background:#fff;color:var(--brand);padding:8px 14px;cursor:pointer}
+button.primary{background:var(--brand);color:#fff}
+button.chip{border-radius:999px;padding:4px 12px;font-size:14px}
+.hint{font-size:13px;color:var(--muted)}
+.tags span{display:inline-block;background:var(--soft);border-radius:6px;padding:2px 8px;margin:2px 4px 2px 0;font-size:14px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:8px 0}
+.stat{background:var(--soft);border-radius:8px;padding:10px}
+.stat b{display:block;font-size:20px;color:var(--brand)}
+.stat small{color:var(--muted)}
+.warn{color:var(--warn)}
+.ok{color:var(--ok)}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th,.tbl td{border-bottom:1px solid var(--line);padding:6px 6px;text-align:left;vertical-align:top}
+.tbl th{background:var(--soft);font-weight:600;white-space:nowrap}
+.tbl td.n{text-align:right;white-space:nowrap}
+.tblwrap{overflow-x:auto}
+tr.same td{background:#ffefc2}
+tr.comm td{background:#fff9ea}
+tr.out td{color:#8a94a3}
+pre.reply{white-space:pre-wrap;background:var(--soft);border-radius:8px;padding:12px;font:inherit;margin:0}
+.gate{text-align:center;padding:60px 16px}
+.hidden{display:none}
+.foot{font-size:13px;color:var(--muted)}
+select{font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div id="gate" class="gate">
+  <h1>問行情</h1>
+  <p id="gateMsg" class="sub">正在確認 ERP 登入身份…</p>
+  <p class="hidden" id="gateLink"><a href="https://homegoestate.github.io/mainmanagement/">前往 HomeGo ERP 登入</a></p>
+</div>
+
+<div id="app" class="wrap hidden">
+  <h1>問行情</h1>
+  <p class="sub">貼上 LINE 送估文字或直接寫路段與條件，先看可核對的成交，再決定怎麼回覆。</p>
+
+  <div class="card">
+    <h2>要查哪一戶？</h2>
+    <textarea id="q" placeholder="例如：永康區東橋七路191號11樓，建坪42坪，預計成交1350萬&#10;或直接貼上整段 LINE 送估文字"></textarea>
+    <div class="row">
+      <span class="hint">試試：</span>
+      <button class="chip" data-ex="1151120 永慶銘星*文綺KIKI&#10;標的位置：東橋七路191號十一樓之6&#10;預計成交價：1350萬元，一年內取得，成交價為1150萬">貼 LINE 送估文字</button>
+      <button class="chip" data-ex="安平區 華廈 屋齡20年內 30坪">路段＋條件</button>
+    </div>
+    <div class="row">
+      <label class="hint">期間 <select id="months"><option value="6">近 6 個月</option><option value="12" selected>近 12 個月</option><option value="24">全部（2025 起）</option></select></label>
+      <button class="primary" id="go">查行情並產生回覆</button>
+      <button id="clear">清空換案</button>
+    </div>
+    <p class="hint" id="meta"></p>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="card">
+    <h2>本公司銀行估價統計</h2>
+    <p class="hint">第二階段接入：LINE 估價系統收到的銀行回覆會在這裡依同棟、同路段統計，與實價登錄一起比對。目前尚未接入。</p>
+  </div>
+
+  <p class="foot">資料來源：內政部不動產交易實價查詢服務網開放資料（政府資料開放授權條款－第1版），本頁依公司規則篩選與整理；非正式估價、銀行回覆或核貸承諾。本頁不保存查詢內容。</p>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+// ---------- 登入閘門：與 HomeGo ERP 同一個 Firebase 專案 ----------
+const ERP_ORIGIN = "https://homegoestate.github.io";
+const app = initializeApp({
+  apiKey: "AIzaSyCSOS-36oQ6hTyhtD2vrez3QGvPdvwMOIw",
+  authDomain: "mainmanagement-1f3d2.firebaseapp.com",
+  projectId: "mainmanagement-1f3d2",
+  appId: "1:916729301354:web:11d81d965c2127b0a17d13"
+});
+let opened = false;
+function openApp(who) {
+  if (opened) return; opened = true;
+  document.getElementById("gate").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  loadData();
+}
+function denied() {
+  if (opened) return;
+  document.getElementById("gateMsg").textContent = "請先登入 HomeGo ERP，再從左側選單開啟「問行情」。";
+  document.getElementById("gateLink").classList.remove("hidden");
+}
+const isLocalTest = ["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).get("test") === "1";
+if (isLocalTest) openApp("local-test");
+onAuthStateChanged(getAuth(app), user => { if (user) openApp(user.email); else setTimeout(denied, 2500); });
+// ERP 以 iframe 開啟時，也會送登入身份過來（僅接受 ERP 同源訊息）
+window.addEventListener("message", e => {
+  if (e.origin !== ERP_ORIGIN && !(isLocalTest && e.origin === location.origin)) return;
+  if (e.data?.type === "HG_ERP_SESSION" && e.data.session?.name) openApp(e.data.session.name);
+});
+
+// ---------- 資料 ----------
+const F = { id:0, dist:1, road:2, addr:3, date:4, btype:5, total:6, unit:7, bld:8, main:9, done:10, floor:11, floors:12, room:13, hall:14, bath:15, lift:16, park:17, note:18, use:19, parkPing:20 };
+let DATA = null, ROADS = [], DISTS = [];
+async function loadData() {
+  const metaEl = document.getElementById("meta");
+  metaEl.textContent = "資料載入中…";
+  try {
+    const res = await fetch("data/tainan.json?v=20261120", { credentials: "omit" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    DATA = await res.json();
+    ROADS = [...new Set(DATA.rows.map(r => r[F.road]).filter(Boolean))].sort((a, b) => b.length - a.length);
+    DISTS = [...new Set(DATA.rows.map(r => r[F.dist]))];
+    const m = DATA.meta;
+    metaEl.textContent = `臺南市成屋（含房地、建物）${m.count.toLocaleString()} 筆；交易日 ${fmtDate(m.from)} 至 ${fmtDate(m.to)}；資料整理日 ${m.builtAt}。`;
+  } catch (err) {
+    metaEl.innerHTML = `<span class="warn">資料載入失敗（${esc(err.message)}），請重新整理。</span>`;
+  }
+}
+
+// ---------- 工具 ----------
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const fmtDate = d => `${String(d).slice(0,4)}/${String(d).slice(4,6)}/${String(d).slice(6,8)}`;
+const half = s => s.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).replace(/臺/g, "台");
+const CN = { 零:0, 一:1, 二:2, 兩:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9, 十:10 };
+function cnNum(s) {
+  if (/^\d+$/.test(s)) return +s;
+  if (s === "十") return 10;
+  if (s.includes("十")) { const [a, b] = s.split("十"); return (a ? CN[a] : 1) * 10 + (b ? CN[b] : 0); }
+  return CN[s] ?? 0;
+}
+const median = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); if (!s.length) return 0; const i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); };
+const r1 = n => Math.round(n * 10) / 10;
+const SPECIAL = /親友|員工|特殊關係|瑕疵|凶|債權|債務|急買|急賣|拍賣|法拍|共有|持分|地上權|政府機關|含租約|調解|毛胚|未登記|含公共設施保留地|二親等|祭祀/;
+const btypeGroup = t => /透天/.test(t) ? "透天" : /公寓/.test(t) ? "公寓" : /華廈/.test(t) ? "華廈" : /住宅大樓/.test(t) ? "大樓" : /套房/.test(t) ? "套房" : "其他";
+
+// ---------- 解析問題 ----------
+function parse(text) {
+  const t = half(text).replace(/\s+/g, " ");
+  const q = { raw: text };
+  const tt = t.replace(/^台南市/, "");
+  q.dist = DISTS.find(d => tt.includes(d)) || "";
+  const addrPart = (t.match(/(?:標的位置|位置|地址|門牌)[:：]?\s*([^\n，,]+)/) || [])[1] || t;
+  const ap = addrPart.replace(/台南市/g, "");
+  q.road = ROADS.find(r => ap.includes(r)) || ROADS.find(r => t.includes(r)) || "";
+  if (q.road) {
+    const after = ap.slice(ap.indexOf(q.road) + q.road.length);
+    const m = after.match(/^((?:\d+巷)?(?:\d+弄)?\d+(?:之\d+)?號)/);
+    if (m) q.no = m[1].replace(/之\d+號$/, "號");
+    const f = after.match(/號(?:之\d+)?\s*(\d+|[一二三四五六七八九十]+)\s*(?:樓|F|f)/);
+    if (f) q.floor = cnNum(f[1]);
+    const u = after.match(/樓\s*之\s*(\d+|[一二三四五六七八九十]+)/);
+    if (u) q.unitNo = cnNum(u[1]);
+  }
+  const area = t.match(/(?:建坪|權狀|坪數|面積)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*坪?/) || t.match(/(\d+(?:\.\d+)?)\s*坪/);
+  if (area) q.area = +area[1];
+  const age = t.match(/屋齡\s*(\d+)\s*年?(內|以內|左右)?/);
+  if (age) { q.age = +age[1]; q.ageWithin = !!age[2] && age[2] !== "左右"; }
+  const price = t.match(/(?:預計成交價|成交價|開價|總價|售價|預計)[^\d]{0,6}(\d+(?:\.\d+)?)\s*萬/) || t.match(/(\d{3,5}(?:\.\d+)?)\s*萬/);
+  if (price) q.price = +price[1];
+  const bt = t.match(/透天|公寓|華廈|大樓|套房/);
+  if (bt) q.btype = bt[0];
+  return q;
+}
+
+// ---------- 查詢 ----------
+const numOf = addr => { const m = addr.match(/(\d+)(?:之\d+)?號/); return m ? +m[1] : 0; };
+const laneOf = (addr, road) => { const m = addr.slice(road.length).match(/^((?:\d+巷)?(?:\d+弄)?)/); return m ? m[1] : ""; };
+const unitOf = addr => { const m = addr.match(/樓之(\d+)/); return m ? +m[1] : 0; };
+const isWhole = r => r[F.park] !== "車位未拆價";   // 單價可直接比較（無車位或車位已拆價）
+const span = a => a.length >= 2 ? `${r1(pct(a, .25))}～${r1(pct(a, .75))}` : a.length ? `${r1(a[0])}` : "—";
+const spanInt = a => a.length >= 2 ? `${Math.round(pct(a, .25)).toLocaleString()}～${Math.round(pct(a, .75)).toLocaleString()}` : a.length ? Math.round(a[0]).toLocaleString() : "—";
+
+function run() {
+  if (!DATA) return;
+  const text = document.getElementById("q").value.trim();
+  const out = document.getElementById("out");
+  if (!text) { out.innerHTML = ""; return; }
+  const q = parse(text);
+  const months = +document.getElementById("months").value;
+  const to = DATA.meta.to;
+  const d = new Date(+String(to).slice(0,4), +String(to).slice(4,6) - 1 - months, +String(to).slice(6,8));
+  const from = months >= 24 ? 0 : d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  const period = months >= 24 ? "2025 年以來" : `近 ${months} 個月`;
+
+  if (!q.road && !q.dist) {
+    out.innerHTML = `<div class="card"><h2>還缺路段</h2><p>請寫出行政區或路名，例如「永康區東橋七路191號」。</p></div>`;
+    return;
+  }
+  const pool = DATA.rows.filter(r => r[F.date] >= from && (!q.road || r[F.road] === q.road) && (!q.dist || r[F.dist] === q.dist));
+  if (q.road && !q.dist) { const ds = [...new Set(pool.map(r => r[F.dist]))]; if (ds.length > 1) q.multiDist = ds; }
+
+  // 同棟：同路段＋同門牌號；同社區（推定）：同巷弄、完成年 ±1、同總樓層、門牌相差 20 號內且同側
+  const sameBld = q.no ? DATA.rows.filter(r => r[F.road] === q.road && r[F.addr].startsWith(q.road + q.no) && (!q.dist || r[F.dist] === q.dist)) : [];
+  const ref = sameBld.find(r => r[F.done]) || null;
+  let commSet = new Set();
+  if (ref) {
+    const n0 = numOf(ref[F.addr]), lane0 = laneOf(ref[F.addr], q.road);
+    for (const r of pool) {
+      const n = numOf(r[F.addr]);
+      if (r[F.dist] === ref[F.dist] && laneOf(r[F.addr], q.road) === lane0 && Math.abs(r[F.done] - ref[F.done]) <= 1 &&
+          r[F.floors] === ref[F.floors] && n && Math.abs(n - n0) <= 20 && n % 2 === n0 % 2) commSet.add(r);
+    }
+  }
+  q.group = q.btype ? btypeGroup(q.btype) : ref ? btypeGroup(ref[F.btype]) : "";
+  // 沒寫坪數：用同門牌、同「之N」其他樓層的建坪推定
+  if (!q.area && q.unitNo && q.no) {
+    const twins = sameBld.filter(r => unitOf(r[F.addr]) === q.unitNo).map(r => r[F.bld]);
+    if (twins.length) { q.area = r1(median(twins)); q.areaGuess = `同門牌「之${q.unitNo}」其他樓層 ${twins.length} 筆推定`; }
+  }
+  const refYear = q.age != null ? new Date().getFullYear() - q.age : ref ? ref[F.done] : 0;
+
+  const reasons = r => {
+    const why = [];
+    if (r[F.use] && !/住|商業/.test(r[F.use])) why.push("非住家用途");
+    if (SPECIAL.test(r[F.note])) why.push("特殊交易");
+    if (!r[F.unit] || r[F.unit] <= 0) why.push("無單價");
+    if (q.group && btypeGroup(r[F.btype]) !== q.group) why.push("型態不同");
+    if (refYear && r[F.done] && (q.ageWithin ? r[F.done] < refYear : Math.abs(r[F.done] - refYear) > 10)) why.push("屋齡差距大");
+    if (q.area && r[F.bld] && (r[F.bld] < q.area * 0.6 || r[F.bld] > q.area * 1.5)) why.push("坪數差距大");
+    return why;
+  };
+  const rows = pool.map(r => ({ r, why: reasons(r), comm: commSet.has(r), bld: sameBld.includes(r) }));
+  const ok = rows.filter(x => !x.why.length);
+  const comm = ok.filter(x => x.comm);
+  const useComm = comm.length >= 3;
+  const base = useComm ? comm : ok;
+  const baseLabel = useComm ? "同社區" : q.road ? "同路段" : "同行政區";
+
+  // A. 單價（不含車位）：無車位或車位已拆價
+  const unitsA = base.filter(x => isWhole(x.r)).map(x => x.r[F.unit]);
+  const roadUnits = ok.filter(x => isWhole(x.r)).map(x => x.r[F.unit]);
+  // B. 含車位總價：車位未拆價、坪數相近（±15%）
+  const similar = x => !q.area || (x.r[F.bld] >= q.area * 0.85 && x.r[F.bld] <= q.area * 1.15);
+  const totB = base.filter(x => !isWhole(x.r) && similar(x)).map(x => x.r[F.total]);
+  const totNoPark = base.filter(x => x.r[F.park] === "" && similar(x)).map(x => x.r[F.total]);
+
+  let est = null;
+  if (q.area && unitsA.length >= 3) est = { lo: Math.round(q.area * pct(unitsA, .25)), mid: Math.round(q.area * median(unitsA)), hi: Math.round(q.area * pct(unitsA, .75)) };
+  const rangeB = q.area && totB.length >= 3 ? { lo: Math.round(pct(totB, .25)), mid: Math.round(median(totB)), hi: Math.round(pct(totB, .75)) } : null;
+  const bandForPrice = rangeB || est;
+
+  const missing = [];
+  if (!q.no) missing.push("門牌號碼（才能找同棟、同社區）");
+  if (!q.area) missing.push("建坪（才能比較總價）");
+  if (!q.group) missing.push("建物型態");
+  if (!refYear) missing.push("屋齡或完成年月");
+  missing.push("有無車位");
+
+  const label = `${q.dist || (ref ? ref[F.dist] : q.multiDist ? q.multiDist.join("／") : "")}${q.road}${q.no || ""}${q.floor ? " " + q.floor + "樓" : ""}${q.unitNo ? "之" + q.unitNo : ""}`;
+  let html = `<div class="card"><h2>內部研判</h2>
+    <div class="tags"><span>標的：${esc(label || "—")}</span>${q.group ? `<span>型態：${esc(q.group)}</span>` : ""}${q.area ? `<span>建坪：${q.area} 坪${q.areaGuess ? "（" + esc(q.areaGuess) + "）" : ""}</span>` : ""}${refYear ? `<span>${q.age != null ? "屋齡 " + q.age + " 年" + (q.ageWithin ? "內" : "") : "同棟完成 " + refYear + " 年"}</span>` : ""}${q.price ? `<span>預計成交：${q.price} 萬</span>` : ""}<span>期間：${period}</span></div>
+    ${q.multiDist && !ref ? `<p class="warn">此路名在 ${q.multiDist.map(esc).join("、")} 都有，請補行政區以免混算。</p>` : ""}
+    ${ref ? `<p class="hint">同社區（推定）：同巷弄、完成 ${ref[F.done]}±1 年、同為 ${ref[F.floors]} 層、門牌相差 20 號內同側，期間內 ${commSet.size} 筆。名稱未經社區名冊核對。</p>` : ""}
+    <div class="stats">
+      <div class="stat"><small>${baseLabel}可比成交</small><b>${base.length} 筆</b><small>${useComm ? "同路段另有 " + ok.length + " 筆" : ref ? "同社區不足 3 筆，改用同路段" : ""}</small></div>
+      <div class="stat"><small>單價（不含車位）</small><b>${unitsA.length >= 3 ? span(unitsA) : "—"}</b><small>${unitsA.length >= 3 ? "萬/坪，中位 " + r1(median(unitsA)) + "（" + unitsA.length + " 筆）" : "可直接算單價的不足 3 筆"}</small></div>
+      <div class="stat"><small>含車位成交總價${q.area ? "（坪數相近）" : "（各種坪數）"}</small><b>${totB.length >= 2 ? spanInt(totB) : "—"}</b><small>${totB.length >= 2 ? "萬，中位 " + Math.round(median(totB)).toLocaleString() + "（" + totB.length + " 筆）" : "車位未拆價的成交不足"}</small></div>
+      <div class="stat"><small>${q.area ? "以單價換算總價" : "總價換算"}</small><b>${est ? est.lo.toLocaleString() + "～" + est.hi.toLocaleString() : "—"}</b><small>${est ? "萬（建坪全數乘單價，無車位情境）" : "需建坪與 3 筆以上單價"}</small></div>
+    </div>
+    ${q.price && bandForPrice ? `<p>${q.price > bandForPrice.hi ? `<span class="warn">預計成交 ${q.price} 萬高於${rangeB ? "含車位成交" : "換算"}區間上緣（${bandForPrice.hi.toLocaleString()} 萬）</span>，送估時要準備理由（樓層、景觀、車位、裝潢）。` : q.price < bandForPrice.lo ? `<span class="ok">預計成交 ${q.price} 萬低於區間下緣（${bandForPrice.lo.toLocaleString()} 萬）</span>，銀行估價可能高於成交價。` : `預計成交 ${q.price} 萬落在${rangeB ? "含車位成交" : "換算"}區間（${bandForPrice.lo.toLocaleString()}～${bandForPrice.hi.toLocaleString()} 萬）內。`}</p>` : ""}
+    <p class="hint">還要跟同仁確認：${missing.map(esc).join("、")}</p>
+  </div>`;
+
+  // 可轉傳回覆
+  const L = [`【行情參考】${label}`];
+  if (base.length) L.push(`${baseLabel}${period}可比成交 ${base.length} 筆（已排除親友、特殊交易等）。`);
+  if (unitsA.length >= 3) L.push(`可直接計算單價者 ${unitsA.length} 筆，單價多落在 ${span(unitsA)} 萬/坪（不含車位）。`);
+  if (totB.length >= 2) L.push(`含車位${q.area ? "、坪數相近" : ""}的成交 ${totB.length} 筆，總價多落在 ${spanInt(totB)} 萬。`);
+  if (q.area && q.areaGuess) L.push(`坪數以同棟同格局推定約 ${q.area} 坪，請以謄本為準。`);
+  if (!base.length || (unitsA.length < 3 && totB.length < 2)) L.push(`可比成交不足，暫不提供區間，建議以銀行估價為準。`);
+  L.push(`以上依內政部實價登錄整理，僅供參考；實際以銀行正式估價與核貸結果為準。`);
+  L.push(`宏國地政｜易丞地政 ☎06-258-2589`);
+  const reply = L.join("\n");
+  html += `<div class="card"><h2>可轉傳回覆</h2><pre class="reply" id="reply">${esc(reply)}</pre>
+    <div class="row"><button class="primary" id="copy">複製回覆</button><span class="hint" id="copied"></span></div></div>`;
+
+  // 明細
+  const list = rows.sort((a, b) => (b.bld - a.bld) || (b.comm - a.comm) || (a.why.length - b.why.length) || b.r[F.date] - a.r[F.date]).slice(0, 80);
+  html += `<div class="card"><h2>成交明細（${rows.length} 筆，列前 ${list.length} 筆）</h2>
+    <p class="hint">深黃＝同棟；淺黃＝同社區（推定）；灰字＝不列入計算。單價欄：車位未拆價者為「總價÷建坪」，僅供參考，不列入單價統計。</p>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>交易日</th><th>門牌</th><th>型態</th><th>樓層</th><th class="n">總價(萬)</th><th class="n">建坪</th><th class="n">單價(萬/坪)</th><th>車位</th><th>完成</th><th>格局</th><th>備註／排除原因</th></tr></thead><tbody>
+    ${list.map(({ r, why, comm, bld }) => `<tr class="${bld ? "same" : comm ? "comm" : ""} ${why.length ? "out" : ""}"><td>${fmtDate(r[F.date])}</td><td>${esc(r[F.dist])} ${esc(r[F.addr])}</td><td>${esc(r[F.btype])}</td><td>${r[F.floor] || "-"}/${r[F.floors] || "-"}</td><td class="n">${r[F.total].toLocaleString()}</td><td class="n">${r[F.bld]}</td><td class="n">${r[F.unit] || "-"}</td><td>${esc(r[F.park] || "無")}</td><td>${r[F.done] || "-"}</td><td>${r[F.room]}房${r[F.hall]}廳${r[F.bath]}衛</td><td>${esc([r[F.note], ...why].filter(Boolean).join("；"))}</td></tr>`).join("")}
+    </tbody></table></div></div>`;
+  out.innerHTML = html;
+  document.getElementById("copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(reply); }
+    catch { const t = document.createElement("textarea"); t.value = reply; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); }
+    document.getElementById("copied").textContent = "已複製";
+  };
+}
+
+document.getElementById("go").onclick = run;
+document.getElementById("months").onchange = () => document.getElementById("out").innerHTML && run();
+document.getElementById("clear").onclick = () => { document.getElementById("q").value = ""; document.getElementById("out").innerHTML = ""; document.getElementById("q").focus(); };
+document.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => { document.getElementById("q").value = b.dataset.ex; run(); });
+</script>
+</body>
+</html>
