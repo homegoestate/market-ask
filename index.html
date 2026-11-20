@@ -113,7 +113,9 @@ window.addEventListener("message", e => {
 });
 
 // ---------- 資料 ----------
-const F = { id:0, dist:1, road:2, addr:3, date:4, btype:5, total:6, unit:7, bld:8, main:9, done:10, floor:11, floors:12, room:13, hall:14, bath:15, lift:16, park:17, note:18, use:19, parkPing:20 };
+const F = { id:0, dist:1, road:2, addr:3, date:4, btype:5, total:6, unit:7, bld:8, main:9, done:10, floor:11, floors:12, room:13, hall:14, bath:15, lift:16, park:17, note:18, use:19, parkPing:20, parkWan:21 };
+const parkText = r => r[F.park] === "車位已拆" ? `車位 ${r[F.parkWan]} 萬${r[F.parkPing] ? "／" + r[F.parkPing] + " 坪" : ""}` : r[F.park] === "車位未拆價" ? `含車位（未拆價${r[F.parkPing] ? "，" + r[F.parkPing] + " 坪" : ""}）` : "無車位";
+const shortAddr = (r, road) => r[F.addr].startsWith(road) ? r[F.addr].slice(road.length) : r[F.addr];
 let DATA = null, ROADS = [], DISTS = [];
 async function loadData() {
   const metaEl = document.getElementById("meta");
@@ -289,14 +291,47 @@ function run() {
   html += `<div class="card"><h2>可轉傳回覆</h2><pre class="reply" id="reply">${esc(reply)}</pre>
     <div class="row"><button class="primary" id="copy">複製回覆</button><span class="hint" id="copied"></span></div></div>`;
 
+  // 給銀行的送估參考（可直接轉發）
+  const B = [`【送估參考】${label}`];
+  if (q.price) B.push(`預計成交價：${q.price} 萬`);
+  if (ref) {
+    const nums = [...commSet].map(r => numOf(r[F.addr])).filter(Boolean);
+    B.push(`社區（依實價登錄推定）：${q.road}${laneOf(ref[F.addr], q.road)}${Math.min(...nums)}～${Math.max(...nums)}號一帶，${ref[F.btype]}，${ref[F.done]} 年完成，地上 ${ref[F.floors]} 層`);
+  }
+  if (q.area) B.push(`標的建坪：約 ${q.area} 坪${q.areaGuess ? "（" + q.areaGuess + "，以謄本為準）" : ""}`);
+  else if (useComm) {
+    const buckets = new Map();
+    for (const x of comm) { const k = Math.round(x.r[F.bld]); const b = buckets.get(k) || { n: 0, room: x.r[F.room], park: 0 }; b.n++; if (x.r[F.park]) b.park++; buckets.set(k, b); }
+    const top = [...buckets.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 3).sort((a, b) => a[0] - b[0]);
+    B.push(`社區常見坪數：${top.map(([k, b]) => `約 ${k} 坪（${b.room} 房，${b.n} 筆，其中 ${b.park} 筆含車位）`).join("、")}`);
+  }
+  const pick = base.filter(similar).sort((a, b) => (b.bld - a.bld) || b.r[F.date] - a.r[F.date]).slice(0, 6);
+  if (pick.length) {
+    B.push(`${baseLabel}${period}成交（實價登錄${q.area ? "，坪數相近" : ""}）：`);
+    pick.forEach((x, i) => { const r = x.r; B.push(`${i + 1}. ${String(r[F.date]).slice(0,4)}/${String(r[F.date]).slice(4,6)} ${shortAddr(r, q.road)}｜建坪 ${r[F.bld]}｜${r[F.room]}房｜總價 ${r[F.total].toLocaleString()} 萬｜${parkText(r)}${isWhole(r) ? `｜單價 ${r[F.unit]} 萬/坪` : ""}`); });
+  }
+  if (unitsA.length >= 3) B.push(`單價（不含車位）：${span(unitsA)} 萬/坪，中位 ${r1(median(unitsA))}（${unitsA.length} 筆）`);
+  if (totB.length >= 2) B.push(`含車位總價${q.area ? "（坪數相近）" : ""}：${spanInt(totB)} 萬，中位 ${Math.round(median(totB)).toLocaleString()}（${totB.length} 筆）`);
+  const parkSplit = base.filter(x => x.r[F.park] === "車位已拆" && x.r[F.parkWan] > 0).map(x => x.r[F.parkWan]);
+  if (parkSplit.length) B.push(`同區段已拆價車位：${spanInt(parkSplit)} 萬（${parkSplit.length} 筆）`);
+  B.push(`資料來源：內政部實價登錄（交易至 ${fmtDate(DATA.meta.to)}），宏國地政整理，僅供估價參考。`);
+  const bankText = B.join("\n");
+  html += `<div class="card"><h2>給銀行的送估參考（可直接轉發）</h2><pre class="reply" id="bankText">${esc(bankText)}</pre>
+    <div class="row"><button class="primary" id="copyBank">複製給銀行</button><span class="hint" id="copiedBank"></span></div></div>`;
+
   // 明細
-  const list = rows.sort((a, b) => (b.bld - a.bld) || (b.comm - a.comm) || (a.why.length - b.why.length) || b.r[F.date] - a.r[F.date]).slice(0, 80);
+  const list =rows.sort((a, b) => (b.bld - a.bld) || (b.comm - a.comm) || (a.why.length - b.why.length) || b.r[F.date] - a.r[F.date]).slice(0, 80);
   html += `<div class="card"><h2>成交明細（${rows.length} 筆，列前 ${list.length} 筆）</h2>
     <p class="hint">深黃＝同棟；淺黃＝同社區（推定）；灰字＝不列入計算。單價欄：車位未拆價者為「總價÷建坪」，僅供參考，不列入單價統計。</p>
     <div class="tblwrap"><table class="tbl"><thead><tr><th>交易日</th><th>門牌</th><th>型態</th><th>樓層</th><th class="n">總價(萬)</th><th class="n">建坪</th><th class="n">單價(萬/坪)</th><th>車位</th><th>完成</th><th>格局</th><th>備註／排除原因</th></tr></thead><tbody>
-    ${list.map(({ r, why, comm, bld }) => `<tr class="${bld ? "same" : comm ? "comm" : ""} ${why.length ? "out" : ""}"><td>${fmtDate(r[F.date])}</td><td>${esc(r[F.dist])} ${esc(r[F.addr])}</td><td>${esc(r[F.btype])}</td><td>${r[F.floor] || "-"}/${r[F.floors] || "-"}</td><td class="n">${r[F.total].toLocaleString()}</td><td class="n">${r[F.bld]}</td><td class="n">${r[F.unit] || "-"}</td><td>${esc(r[F.park] || "無")}</td><td>${r[F.done] || "-"}</td><td>${r[F.room]}房${r[F.hall]}廳${r[F.bath]}衛</td><td>${esc([r[F.note], ...why].filter(Boolean).join("；"))}</td></tr>`).join("")}
+    ${list.map(({ r, why, comm, bld }) => `<tr class="${bld ? "same" : comm ? "comm" : ""} ${why.length ? "out" : ""}"><td>${fmtDate(r[F.date])}</td><td>${esc(r[F.dist])} ${esc(r[F.addr])}</td><td>${esc(r[F.btype])}</td><td>${r[F.floor] || "-"}/${r[F.floors] || "-"}</td><td class="n">${r[F.total].toLocaleString()}</td><td class="n">${r[F.bld]}</td><td class="n">${r[F.unit] || "-"}</td><td>${esc(parkText(r))}</td><td>${r[F.done] || "-"}</td><td>${r[F.room]}房${r[F.hall]}廳${r[F.bath]}衛</td><td>${esc([r[F.note], ...why].filter(Boolean).join("；"))}</td></tr>`).join("")}
     </tbody></table></div></div>`;
   out.innerHTML = html;
+  document.getElementById("copyBank").onclick = async () => {
+    try { await navigator.clipboard.writeText(bankText); }
+    catch { const t = document.createElement("textarea"); t.value = bankText; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); }
+    document.getElementById("copiedBank").textContent = "已複製";
+  };
   document.getElementById("copy").onclick = async () => {
     try { await navigator.clipboard.writeText(reply); }
     catch { const t = document.createElement("textarea"); t.value = reply; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); }
