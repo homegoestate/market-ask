@@ -121,7 +121,7 @@ async function loadData() {
   const metaEl = document.getElementById("meta");
   metaEl.textContent = "資料載入中…";
   try {
-    const res = await fetch("data/tainan.json?v=20261120", { credentials: "omit" });
+    const res = await fetch("data/tainan.json?v=20261120b", { credentials: "omit" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     DATA = await res.json();
     ROADS = [...new Set(DATA.rows.map(r => r[F.road]).filter(Boolean))].sort((a, b) => b.length - a.length);
